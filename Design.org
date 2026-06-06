@@ -1,0 +1,171 @@
+#+TITLE: Advices.wl — Design
+#+SUBTITLE: Emacs-style function advising for the Wolfram Language
+#+AUTHOR: Cass × JuanG970
+#+STARTUP: overview
+#+PROPERTY: header-args :wolfram :results silent
+
+* About this document
+  This is the architecture and rationale for =Advices.wl=, a paclet that
+  provides Emacs-style function advising (=advice-add=, =advice-remove=)
+  for the Wolfram Language. The implementation lives in [[file:Implementation.org][Implementation.org]].
+
+* The problem
+  Wolfram Language has no first-class mechanism for injecting behavior
+  into an existing function globally. The standard workaround is to
+  define a wrapper function and ask all call sites to use it. That
+  doesn't compose: two unrelated packages that want to advise the same
+  symbol collide. There's no priority, no clean removal, no
+  introspection.
+
+  /Advices/ fixes this. You /own/ the symbol; =Advices= re-routes
+  calls through a single dispatcher that knows how to run a stack of
+  advices.
+
+* v0.1 scope (explicit, not implicit)
+** Combinators: three, not four
+   - =:before= — run before the original. Gets =args=. Return value
+     discarded.
+   - =:around= — wraps the original. Receives =origFun= as the first
+     argument, then =args=. Composes via =Fold=. If you don't call
+     =origFun=, the original doesn't run.
+   - =:after= — run after the original. Gets =args=. Return value
+     discarded.
+
+   /Dropped for v0.1:/ =:override= (the original design had it). The
+   Emacs semantics for =:override= are subtle and the interactions
+   with =:around= confused the contract. Use a single =:around= with
+   the lowest priority for override-like behavior.
+
+** Ownership contract (HARD RULE)
+   /When you call =AdviceAdd= on a symbol, you are declaring that this
+   package owns that symbol. If you ever call =Clear= or =ClearAll= on
+   the symbol, you must first call =AdviceClear=. Otherwise the
+   registry still says "active" but the dispatcher rule is gone, and
+   you'll get surprising behavior./
+
+   This is a one-line rule and it's the price of the design. Documented
+   in the README, asserted in the tests, accepted as a tradeoff.
+
+** Priority semantics
+   - Lower =priority= number = runs first.
+   - Default priority is =50=.
+   - Within a combinator, advices are sorted by priority and run in
+     priority order. Ties broken by registration order.
+   - Different combinators don't share priority space; =:before= and
+     =:after= and =:around= are independent stacks.
+
+* Design Principles
+** Centralized Registry
+   One global =$Registry= holds all advice metadata. The dispatcher
+   reads from it. There's exactly one =DownValues= rule on the target
+   symbol — a "hook" that checks =$ActiveQ= and either dispatches or
+   falls through to the original.
+
+** Idempotency
+   Registering the same =adviceFunc= on the same =target= and
+   combinator twice does /not/ stack. (Implementation choice: it would
+   be a footgun to allow duplicate hooks. We can lift this constraint
+   in v0.2 if a real use case shows up.)
+
+** Isolation via Block
+   The original target is called inside =Block[{$ActiveQ = False}, ...]=
+   so the dispatcher knows to fall through. This prevents infinite
+   recursion if an advice calls the same target.
+
+* System Architecture
+#+BEGIN_SRC text
+  Caller invokes advisedTarget[args___]
+                 │
+                 ▼
+        ┌──────────────────────┐    False   ┌────────────────────────┐
+        │  ActiveQ for target? ├──────────►│ Fall through to       │
+        └──────────┬───────────┘            │ target's DownValues    │
+                   │ True                   │ (which may be original │
+                   ▼                        │ or may be empty)        │
+        ┌──────────────────────┐            └────────────────────────┘
+        │   AdviceDispatcher   │
+        │  (single rule)       │
+        └──────────┬───────────┘
+                   │
+        ┌──────────┴─────────────────────────────┐
+        │ 1. Sort by priority and run :before    │
+        │ 2. Fold :around chain over origFun     │
+        │    (origFun = Block[{$ActiveQ=False},  │
+        │                     target[args]] )    │
+        │ 3. Run :after stack with same args     │
+        └──────────┬─────────────────────────────┘
+                   │
+                   ▼
+               result
+#+END_SRC
+
+* Registry Shape
+   The registry is an Association keyed by =Hold[target]=, valued by
+   another Association keyed by combinator.
+
+   #+BEGIN_SRC wolfram
+   $Registry = <|
+     Hold[TargetSymbol] -> <|
+       :before -> {AdviceObj[func, priority]...},
+       :around -> {AdviceObj[func, priority]...},
+       :after  -> {AdviceObj[func, priority]...}
+     |>
+   |>;
+   #+END_SRC
+
+   =$ActiveQ= is a parallel =Association= from =Hold[target]= → =True|False=
+   used by the dispatcher to decide whether to invoke the advice chain
+   or fall through to the original.
+
+* What advices look like
+
+   :before / :after get a positional arg list (use =args___= so they
+   can accept any arity):
+
+   #+BEGIN_SRC wolfram
+   logBefore[args___] := Print["[before] ", {args}]
+   #+END_SRC
+
+   :around gets the original target as the first argument, then the
+   call's args as =args___=:
+
+   #+BEGIN_SRC wolfram
+   aroundHook[origFun_, x_] := origFun[x] + 1
+   (* OR, for variable arity: *)
+   aroundHook[origFun_, args___] := If[Length[{args}] === 0, 0, origFun[args] + 1]
+   #+END_SRC
+
+* Why this is the right design (and what we lost)
+** Gained
+   - Composability: many packages can advise the same symbol.
+   - Priority ordering: deterministic and explicit.
+   - Clean removal: =AdviceRemove[target, adviceFunc]= surgically pulls
+     one hook out.
+   - Introspection: =AdviceList[]= returns a =Dataset= of the registry.
+** Lost
+   - Cannot advise =Protected= symbols whose =Unprotect= would have
+     side effects elsewhere. (Acceptable — that's a sign the symbol
+     /shouldn't/ be advised.)
+   - No =:override= combinator. Use =:around= with priority 0.
+   - No thread-local advice. (Mathematica doesn't really have threads
+     in the sense this matters; not a real loss.)
+   - Cannot advise =Set= / =SetDelayed= / =Up= / =Down= (rule-shape
+     operators) cleanly. The dispatcher rule would conflict. v0.1
+     explicitly doesn't try to handle these.
+
+* What's deferred to v0.2+
+   - =:override= combinator (revisit when someone has a real use case)
+   - =:filter-args= (Emacs' =:filter-args= combinator) — useful but
+     a non-trivial design choice (do filters compose? do they see
+     evaluated args or held args?)
+   - =:depth= / stack-aware recursión
+   - =AdviceRemoveAll[combinator]= for bulk clear
+   - Per-symbol advice count limits (to prevent pathological stacks)
+   - Paclet-site publication (this v0.1 ships from the repo)
+
+* Cross-references
+   - [[file:Implementation.org][Implementation.org]] — the code
+   - [[file:Tests.org][Tests.org]] — test plan
+   - [[file:README.org][README.org]] — install + quickstart
+   - [[file:Advices.wl][Advices.wl]] — generated source (tangled from Implementation.org)
+   - [[file:Advices.wlt][Advices.wlt]] — generated test file (tangled from Tests.org)

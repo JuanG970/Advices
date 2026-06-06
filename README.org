@@ -1,0 +1,112 @@
+#+TITLE: Advices.wl
+#+SUBTITLE: Emacs-style function advising for the Wolfram Language
+
+* What is this?
+  A small paclet that gives you =advice-add= / =advice-remove= semantics
+  on any Wolfram Language symbol. Three combinators, priority-ordered
+  composition, recursion-safe, single-rule dispatcher.
+
+* Install
+#+BEGIN_SRC wolfram
+PacletInstall["Advices`"]
+Needs["Advices`"]
+#+END_SRC
+
+  Or from a local checkout:
+#+BEGIN_SRC wolfram
+PacletDirectoryLoad[NotebookDirectory[]]  (* or wherever you cloned *)
+Needs["Advices`"]
+#+END_SRC
+
+* 30-second tour
+#+BEGIN_SRC wolfram
+myFunc[x_] := (Print["inner: ", x]; x^2)
+
+logBefore[args___] := Print["[before] args: ", {args}]
+logAfter[args___]  := Print["[after] done"]
+
+AdviceAdd[myFunc, :before, logBefore]
+AdviceAdd[myFunc, :after, logAfter]
+
+myFunc[5]
+(* [before] args: {5} *)
+(* inner: 5 *)
+(* [after] done *)
+(* 25 *)
+
+AdviceList[myFunc]    (* see what's registered *)
+AdviceRemove[myFunc, logBefore]
+AdviceClear[myFunc]   (* tear down completely *)
+#+END_SRC
+
+* API
+** =AdviceAdd[target, combinator, adviceFunc, priority: 50]=
+   - /target/: any symbol. Must not be the subject of an external
+     =Clear= / =ClearAll= during the advice's lifetime — see [[file:Design.org][Design.org]]
+     for the ownership contract.
+   - /combinator/: one of =:before=, =:around=, =:after=.
+   - /adviceFunc/: a function. Schema depends on the combinator.
+   - /priority/: Integer. Lower = runs first. Default =50=.
+   - Returns: =$Registry= on success, =$Failed= on invalid combinator.
+   - /Idempotent/: re-registering the same =adviceFunc= is a no-op.
+
+*** Combinator schemas
+    - =:before [args___]= — runs before the original. Return ignored.
+    - =:after [args___]= — runs after the original. Return ignored.
+    - =:around [origFun_, args___]= — composes around the original.
+      You can call =origFun= zero, one, or many times. The =args___=
+      pattern lets the advice accept any arity.
+
+** =AdviceRemove[target, adviceFunc]=
+   Removes a specific advice. No-op if not registered. If removing the
+   last advice on a target, the dispatcher is also torn down and
+   the target's =DownValues= are restored.
+
+** =AdviceClear[target]=
+   Removes all advices on a target. Restores the original
+   =DownValues= state. Always safe to call.
+
+** =AdviceList[]= / =AdviceList[target]=
+   Returns a =Dataset= view of the registry. Useful for debugging.
+
+** =AdviceCount[target]=
+   Returns the total number of advices on a target (= 0= if none).
+
+* Hard rule: ownership
+   When you call =AdviceAdd= on a symbol, /you own it/. If you
+   subsequently call =Clear= or =ClearAll= on the symbol without first
+   calling =AdviceClear=, the registry will be out of sync with reality:
+   the dispatcher rule will be gone but the registry will say "active."
+   The next call to the target will go directly to its (now possibly
+   empty) =DownValues=, skipping all advices. =AdviceClear= and
+   =AdviceList= will continue to work; calls to the target will not.
+
+   This is a deliberate tradeoff: it keeps the dispatcher simple and
+   fast. If you want bulletproof behavior against external clears,
+   wrap the target in a proxy function and advise the proxy.
+
+* Scope of v0.1
+   - Combinators: =:before=, =:around=, =:after= (=:override= is
+     deferred — use =:around= with priority 0).
+   - Distribution: paclet from this repo.
+   - Tested with Wolfram Engine 14.3 on Linux.
+
+* Deferred to v0.2+
+   - =:override= combinator
+   - =:filter-args= combinator
+   - =AdviceRemoveAll[combinator]= for bulk clear
+   - Per-symbol advice count limits
+   - Paclet-site publication
+
+* Where the docs live
+   - [[file:Design.org][Design.org]] — architecture, design decisions, scope
+   - [[file:Implementation.org][Implementation.org]] — the source code (tangles to =Advices.wl=)
+   - [[file:Tests.org][Tests.org]] — 15 test cases (tangles to =Advices.wlt=)
+   - [[file:PacletInfo.wl][PacletInfo.wl]] — paclet manifest
+   - This file — install + quickstart
+
+* License
+  MIT. See [[file:LICENSE][LICENSE]].
+
+* Author
+  Cass (a Wolfram-specialist AI assistant) × JuanG970

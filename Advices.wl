@@ -1,0 +1,232 @@
+
+(* ::Title:: Advices.wl — Emacs-style function advising for Wolfram Language *)
+(* ::Author:: Cass × JuanG970 *)
+(* ::Version:: 0.1.0 *)
+(* ::History:: *)
+(*   0.1.0  2026-06-05  First public release. *)
+(*                Combinators: :before, :around, :after. *)
+(*                See Design.org for architecture and Tests.org for test plan. *)
+
+BeginPackage["Advices`"];
+
+
+(* ::Section:: Public API *)
+
+(* AdviceAdd[target, combinator, adviceFunc, priority] *)
+(*   Registers an advice. combinator in {:before, :around, :after}. *)
+(*   priority defaults to 50. Lower runs first. *)
+(*   Idempotent: re-registering the same adviceFunc is a no-op. *)
+AdviceAdd::usage = "AdviceAdd[target_Symbol, combinator_Keyword, adviceFunc, priority:50] registers a global advice. combinator must be :before, :around, or :after.";
+
+(* AdviceRemove[target, adviceFunc] *)
+(*   Removes one advice. No-op if not present. *)
+AdviceRemove::usage = "AdviceRemove[target_Symbol, adviceFunc] removes a specific advice. No-op if the advice is not registered.";
+
+(* AdviceClear[target] *)
+(*   Removes all advices from a target and restores the original *)
+(*   DownValues state. *)
+AdviceClear::usage = "AdviceClear[target_Symbol] removes all advices from a target and restores the original DownValues.";
+
+(* AdviceList[] or AdviceList[target] *)
+(*   Returns a Dataset summary of the active registry. *)
+AdviceList::usage = "AdviceList[] returns a Dataset of all active advices. AdviceList[target] returns those on a specific target.";
+
+(* AdviceCount[target] *)
+(*   Returns the number of advices currently on a target. *)
+AdviceCount::usage = "AdviceCount[target_Symbol] returns the total number of advices currently registered for target.";
+
+
+Begin["`Private`"];
+
+(* ::Section:: Internal State *)
+
+(* $Registry:      Association[Hold[target] -> Association[:before|:around|:after -> {AdviceObj[func, priority], ...}]] *)
+(* $InsideDispatch: Association[Hold[target] -> True|False], used by dispatcher for recursion control *)
+If[!AssociationQ[$Registry], $Registry = <||>];
+If[!AssociationQ[$InsideDispatch], $InsideDispatch = <||>];
+
+(* AdviceObj: a small wrapper so we can carry the priority alongside the function *)
+(* We use a head symbol so the registry lists remain printable. *)
+ClearAll[AdviceObj];
+AdviceObj[func_, priority_] := {func, priority};
+
+
+(* ::Section:: AdviceAdd *)
+
+SetAttributes[AdviceAdd, HoldFirst];
+
+AdviceAdd::invcomb = "Combinator `1` must be :before, :around, or :after.";
+AdviceAdd::inuse = "Target `1` is currently Protected and Advices could not Unprotect it.";
+
+AdviceAdd[target_Symbol, combinator_Keyword, adviceFunc_, priority_Integer:50] := Module[
+  {key = Hold[target], wasProtected, symList, idx},
+
+  (* Validate combinator *)
+  If[!MemberQ[{:before, :around, :after}, combinator],
+    Message[AdviceAdd::invcomb, combinator]; Return[$Failed]
+  ];
+
+  (* Initialize registry slot for this target *)
+  If[!KeyExistsQ[$Registry, key],
+    $Registry[key] = <|:before -> {}, :around -> {}, :after -> {}|>
+  ];
+
+  (* Idempotency: if adviceFunc is already registered for this combinator, do nothing *)
+  symList = $Registry[key, combinator];
+  If[MemberQ[symList, AdviceObj[adviceFunc, _]],
+    Return[$Registry]
+  ];
+
+  (* Insert and re-sort by priority (stable sort preserves registration order on ties) *)
+  AppendTo[$Registry[key, combinator], AdviceObj[adviceFunc, priority]];
+  $Registry[key, combinator] = SortBy[$Registry[key, combinator], Last];
+
+  (* Install the dispatcher hook on first registration for this target *)
+  $InsideDispatch[key] = False;
+  wasProtected = MemberQ[Attributes[target], Protected];
+  If[wasProtected, Unprotect[target]];
+
+  (* Check whether an AdviceDispatcher rule is already in DownValues. *)
+  (* Match any rule (Rule or RuleDelayed) whose RHS is an AdviceDispatcher call. *)
+  If[FreeQ[DownValues[target], _[_, AdviceDispatcher[___]]],
+    PrependTo[DownValues[target],
+      HoldPattern[target[args___]] /; ! TrueQ[$InsideDispatch[Hold[target]]] :>
+        AdviceDispatcher[target, Hold[args]]
+    ]
+  ];
+
+  If[wasProtected, Protect[target]];
+
+  $Registry
+]
+
+
+(* ::Section:: AdviceRemove *)
+
+SetAttributes[AdviceRemove, HoldFirst];
+
+AdviceRemove[target_Symbol, adviceFunc_] := Module[{key = Hold[target]},
+  If[!KeyExistsQ[$Registry, key], Return[$Registry]];
+
+  (* Filter out the specific advice from each combinator stack *)
+  $Registry[key] = Map[
+    Select[!(#[[1]] === adviceFunc) &],
+    $Registry[key]
+  ];
+
+  (* If everything is empty, fully clear this target *)
+  If[AllTrue[Values[$Registry[key]], Length[#] == 0 &],
+    AdviceClear[target]
+  ];
+
+  $Registry
+]
+
+
+(* ::Section:: AdviceClear *)
+
+SetAttributes[AdviceClear, HoldFirst];
+
+AdviceClear[target_Symbol] := Module[{key = Hold[target], wasProtected},
+  KeyDropFrom[$Registry, key];
+  KeyDropFrom[$InsideDispatch, key];
+
+  wasProtected = MemberQ[Attributes[target], Protected];
+  If[wasProtected, Unprotect[target]];
+
+  (* Remove only the dispatcher rule; leave all other DownValues intact *)
+  (* Match any rule (Rule or RuleDelayed) whose RHS is an AdviceDispatcher call. *)
+  DownValues[target] = DeleteCases[DownValues[target], _[_, AdviceDispatcher[___]]];
+
+  If[wasProtected, Protect[target]];
+
+  $Registry
+]
+
+
+(* ::Section:: AdviceList / AdviceCount *)
+
+SetAttributes[AdviceList, HoldFirst];
+
+AdviceList[] := Dataset[$Registry];
+
+AdviceList[target_Symbol] := Module[{key = Hold[target]},
+  If[KeyExistsQ[$Registry, key], Dataset[$Registry[key]], Dataset[<||>]]
+];
+
+AdviceCount[target_Symbol] := Module[{key = Hold[target]},
+  If[!KeyExistsQ[$Registry, key], Return[0]];
+  Total[Length /@ Values[$Registry[key]]]
+];
+
+
+(* ::Section:: Dispatcher *)
+
+SetAttributes[AdviceDispatcher, HoldFirst];
+
+(* The single entry point that runs the advice chain. *)
+(* Strategy: Hold[args___] captures the caller's arguments in *)
+(* unevaluated form. We then call ReleaseHold[Hold[args]] once to *)
+(* produce the evaluated values. Advices see those evaluated values. *)
+(* Recursion guard: the dispatcher rule's condition is *)
+(*   /; ! TrueQ[$InsideDispatch[Hold[target]]] *)
+(* We set $InsideDispatch=True on entry and reset on exit. Advices *)
+(* calling target[args] from inside the chain will hit the dispatcher *)
+(* with $InsideDispatch already True and fall through to the original. *)
+(* Calling a *different* advised target is unaffected. *)
+AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
+  {key = Hold[target], before, around, after, result, runOriginal, argsSeq, prev},
+
+  (* Save the previous value of the dispatch flag for this target, *)
+  (* then set it True. We restore on exit so nested dispatcher calls *)
+  (* see this flag as True (they save True, set True, restore True) *)
+  (* and so the outer dispatcher sees this flag as False after the *)
+  (* inner call returns. This guarantees mutual-exclusion semantics. *)
+  prev = Lookup[$InsideDispatch, key, False];
+  $InsideDispatch[key] = True;
+
+  (* Single release of the held args. After this, argsSeq is a flat *)
+  (* sequence of evaluated values. Side-effects from evaluation happen *)
+  (* exactly once, right here. *)
+  argsSeq = ReleaseHold[Hold[args]];
+
+  (* Snapshot the active stacks (avoid registry mutation during execution) *)
+  before = $Registry[key, :before, [[All, 1]]];
+  around = $Registry[key, :around, [[All, 1]]];
+  after  = $Registry[key, :after,  [[All, 1]]];
+
+  (* Closure that invokes the original target. Because $InsideDispatch *)
+  (* is True at this point, the dispatcher rule's condition fails and *)
+  (* the call falls through to the target's original DownValues. *)
+  runOriginal[wrappedArgs___] := target[wrappedArgs];
+
+  result = Catch[
+    (* 1. Run :before hooks in order; their return values are discarded *)
+    Scan[#[argsSeq] &, before];
+
+    (* 2. Compose :around chain via Fold, with runOriginal as the seed *)
+    If[Length[around] === 0,
+      runOriginal[argsSeq],
+      Fold[
+        Function[{nextFun, currentAdvice}, currentAdvice[nextFun, argsSeq] &],
+        runOriginal,
+        Reverse[around]
+      ][]
+    ];
+
+    (* 3. Run :after hooks; their return values are discarded *)
+    Scan[#[argsSeq] &, after];
+
+    (* Return the value of the last expression before this comment *)
+    result
+  ];
+
+  (* Always restore the dispatch flag, even if an advice threw. *)
+  $InsideDispatch[key] = prev;
+
+  result
+]
+
+
+End[];
+EndPackage[];
