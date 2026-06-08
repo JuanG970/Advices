@@ -1,5 +1,7 @@
-
 (* ::Section:: Test Infrastructure *)
+(* ::DO NOT EDIT:: This file is auto-generated from Tests.org.      *)
+(*                Edit the .org, then run `make tangle` (Makefile).  *)
+(*                See Implementation.org for the code under test.    *)
 
 (* Load the package under test. *)
 VerificationTest[
@@ -12,7 +14,6 @@ VerificationTest[
   Null,
   TestID -> "Load-Advices"
 ]
-
 
 (* ::Section:: Test 1 — Basic "before" / "after" *)
 
@@ -32,7 +33,6 @@ VerificationTest[
   TestID -> "Basic-Before-After"
 ]
 
-
 VerificationTest[
   Module[{targetCalc, aroundHook},
     targetCalc[val_] := val + 10;
@@ -46,7 +46,6 @@ VerificationTest[
   {30, -1},
   TestID -> "Around-Intercept-Bypass"
 ]
-
 
 VerificationTest[
   Module[{calls = {}, f, a, b, c},
@@ -64,7 +63,6 @@ VerificationTest[
   {"C", "B", "A"},
   TestID -> "Priority-Ordering-Lower-First"
 ]
-
 
 VerificationTest[
   Module[{calls = {}, f, h1, h2, h3},
@@ -84,7 +82,6 @@ VerificationTest[
   TestID -> "Around-Chain-Composes"
 ]
 
-
 VerificationTest[
   Module[{captured = <||>, f, beforeFn, afterFn},
     f[x_, y_] := x + y;
@@ -100,7 +97,6 @@ VerificationTest[
   TestID -> "Before-After-See-Same-Args"
 ]
 
-
 VerificationTest[
   Module[{calls = {}, f, recurseHook},
     f[0] := 1;
@@ -114,7 +110,6 @@ VerificationTest[
   {1, 6},
   TestID -> "Recursion-Safety"
 ]
-
 
 VerificationTest[
   Module[{myFunc, hook},
@@ -132,7 +127,6 @@ VerificationTest[
   TestID -> "Protected-Symbol-Round-Trip"
 ]
 
-
 VerificationTest[
   Module[{calls = 0, f, hook},
     f[x_] := x;
@@ -147,7 +141,6 @@ VerificationTest[
   1,
   TestID -> "Idempotency-Same-Advice-Twice"
 ]
-
 
 VerificationTest[
   Module[{calls = {}, f, h1, h2, h3},
@@ -167,7 +160,6 @@ VerificationTest[
   TestID -> "AdviceRemove-One-Leaves-Others"
 ]
 
-
 VerificationTest[
   Module[{f, neverAdded},
     f[x_] := x;
@@ -182,7 +174,6 @@ VerificationTest[
   {1, 0},
   TestID -> "Remove-Non-Existent-Is-No-Op"
 ]
-
 
 VerificationTest[
   Module[{calls = {}, f, h1, h2},
@@ -199,7 +190,6 @@ VerificationTest[
   TestID -> "AdviceClear-Fully-Purges"
 ]
 
-
 VerificationTest[
   Module[{counter = 0, f, sideEffect, hook},
     f[x_] := x;
@@ -213,7 +203,6 @@ VerificationTest[
   {2, 2},
   TestID -> "Holding-Boundary-Args-Evaluated-Once"
 ]
-
 
 VerificationTest[
   Module[{f, g, fh, gh},
@@ -234,7 +223,6 @@ VerificationTest[
   TestID -> "Multiple-Symbols-No-Interference"
 ]
 
-
 VerificationTest[
   Module[{f, h1, h2, ds},
     f[x_] := x;
@@ -249,7 +237,6 @@ VerificationTest[
   {Dataset, 0},
   TestID -> "AdviceList-Returns-Dataset"
 ]
-
 
 VerificationTest[
   Module[{f, h},

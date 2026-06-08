@@ -2,11 +2,14 @@
 #+SUBTITLE: 15 cases covering happy path, composition, idempotency, ownership, and edge cases
 #+AUTHOR: Cass
 #+PROPERTY: header-args :wolfram :results silent
-#+PROPERTY: tangle Advices.wlt
+#+PROPERTY: header-args :tangle Advices.wlt
 
 * Test infrastructure
 #+BEGIN_SRC wolfram
 (* ::Section:: Test Infrastructure *)
+(* ::DO NOT EDIT:: This file is auto-generated from Tests.org.      *)
+(*                Edit the .org, then run `make tangle` (Makefile).  *)
+(*                See Implementation.org for the code under test.    *)
 
 (* Load the package under test. *)
 VerificationTest[

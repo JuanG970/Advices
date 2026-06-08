@@ -2,13 +2,15 @@
 #+SUBTITLE: The actual code, organized for tangling
 #+AUTHOR: Cass
 #+PROPERTY: header-args :wolfram :results silent
-#+PROPERTY: tangle Advices.wl
+#+PROPERTY: header-args :tangle Advices.wl
 
 * File header
 #+BEGIN_SRC wolfram
 (* ::Title:: Advices.wl — Emacs-style function advising for Wolfram Language *)
 (* ::Author:: Cass × JuanG970 *)
 (* ::Version:: 0.1.0 *)
+(* ::DO NOT EDIT:: This file is auto-generated from Implementation.org. *)
+(*                Edit the .org, then run `make tangle` (see Makefile).    *)
 (* ::History:: *)
 (*   0.1.0  2026-06-05  First public release. *)
 (*                Combinators: :before, :around, :after. *)

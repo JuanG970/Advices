@@ -1,14 +1,14 @@
-
 (* ::Title:: Advices.wl — Emacs-style function advising for Wolfram Language *)
 (* ::Author:: Cass × JuanG970 *)
 (* ::Version:: 0.1.0 *)
+(* ::DO NOT EDIT:: This file is auto-generated from Implementation.org. *)
+(*                Edit the .org, then run `make tangle` (see Makefile).    *)
 (* ::History:: *)
 (*   0.1.0  2026-06-05  First public release. *)
 (*                Combinators: :before, :around, :after. *)
 (*                See Design.org for architecture and Tests.org for test plan. *)
 
 BeginPackage["Advices`"];
-
 
 (* ::Section:: Public API *)
 
@@ -35,7 +35,6 @@ AdviceList::usage = "AdviceList[] returns a Dataset of all active advices. Advic
 (*   Returns the number of advices currently on a target. *)
 AdviceCount::usage = "AdviceCount[target_Symbol] returns the total number of advices currently registered for target.";
 
-
 Begin["`Private`"];
 
 (* ::Section:: Internal State *)
@@ -49,7 +48,6 @@ If[!AssociationQ[$InsideDispatch], $InsideDispatch = <||>];
 (* We use a head symbol so the registry lists remain printable. *)
 ClearAll[AdviceObj];
 AdviceObj[func_, priority_] := {func, priority};
-
 
 (* ::Section:: AdviceAdd *)
 
@@ -100,7 +98,6 @@ AdviceAdd[target_Symbol, combinator_String, adviceFunc_, priority_Integer:50] :=
   $Registry
 ]
 
-
 (* ::Section:: AdviceRemove *)
 
 SetAttributes[AdviceRemove, HoldFirst];
@@ -122,7 +119,6 @@ AdviceRemove[target_Symbol, adviceFunc_] := Module[{key = Hold[target]},
   $Registry
 ]
 
-
 (* ::Section:: AdviceClear *)
 
 SetAttributes[AdviceClear, HoldFirst];
@@ -143,7 +139,6 @@ AdviceClear[target_Symbol] := Module[{key = Hold[target], wasProtected},
   $Registry
 ]
 
-
 (* ::Section:: AdviceList / AdviceCount *)
 (* Note: HoldFirst wraps the argument in Hold[]. Use HoldPattern so the pattern *)
 (* matches a held symbol without forcing evaluation. *)
@@ -160,7 +155,6 @@ AdviceCount[HoldPattern[target_Symbol]] := Module[{key = Hold[target]},
   If[!KeyExistsQ[$Registry, key], Return[0]];
   Total[Length /@ Values[$Registry[key]]]
 ];
-
 
 (* ::Section:: Dispatcher *)
 
@@ -237,7 +231,6 @@ AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
 
   caught
 ]
-
 
 End[];
 EndPackage[];
