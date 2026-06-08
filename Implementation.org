@@ -24,10 +24,10 @@ BeginPackage["Advices`"];
 (* ::Section:: Public API *)
 
 (* AdviceAdd[target, combinator, adviceFunc, priority] *)
-(*   Registers an advice. combinator in {"before", "around", "after"} (as strings). *)
+(*   Registers an advice. combinator in {"Before", "Around", "After"} (as strings). *)
 (*   priority defaults to 50. Lower runs first. *)
 (*   Idempotent: re-registering the same adviceFunc is a no-op. *)
-AdviceAdd::usage = "AdviceAdd[target_Symbol, combinator_String, adviceFunc, priority:50] registers a global advice. combinator must be \"before\", \"around\", or \"after\".";
+AdviceAdd::usage = "AdviceAdd[target_Symbol, combinator_String, adviceFunc, priority:50] registers a global advice. combinator must be \"Before\", \"Around\", or \"After\".";
 
 (* AdviceRemove[target, adviceFunc] *)
 (*   Removes one advice. No-op if not present. *)
@@ -70,20 +70,20 @@ AdviceObj[func_, priority_] := {func, priority};
 
 SetAttributes[AdviceAdd, HoldFirst];
 
-AdviceAdd::invcomb = "Combinator `1` must be \"before\", \"around\", or \"after\".";
+AdviceAdd::invcomb = "Combinator `1` must be \"Before\", \"Around\", or \"After\".";
 AdviceAdd::inuse = "Target `1` is currently Protected and Advices could not Unprotect it.";
 
 AdviceAdd[target_Symbol, combinator_String, adviceFunc_, priority_Integer:50] := Module[
   {key = Hold[target], wasProtected, symList, idx},
 
   (* Validate combinator *)
-  If[!MemberQ[{"before", "around", "after"}, combinator],
+  If[!MemberQ[{"Before", "Around", "After"}, combinator],
     Message[AdviceAdd::invcomb, combinator]; Return[$Failed]
   ];
 
   (* Initialize registry slot for this target *)
   If[!KeyExistsQ[$Registry, key],
-    $Registry[key] = <|"before" -> {}, "around" -> {}, "after" -> {}|>
+    $Registry[key] = <|"Before" -> {}, "Around" -> {}, "After" -> {}|>
   ];
 
   (* Idempotency: if adviceFunc is already registered for this combinator, do nothing *)
@@ -216,12 +216,12 @@ AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
   argsSeq = ReleaseHold[Hold[args]];
 
   (* Snapshot the active stacks (avoid registry mutation during execution) *)
-  (* Note: the local var names "before", "around", "after" shadow the string keys in the *)
+  (* Note: the local var names "Before", "Around", "After" shadow the string keys in the *)
   (* registry. We read the registry into fresh names to avoid name-resolution confusion. *)
   Module[{bs, rs, as},
-    bs = Lookup[$Registry[key], "before", {}];
-    rs = Lookup[$Registry[key], "around", {}];
-    as = Lookup[$Registry[key], "after",  {}];
+    bs = Lookup[$Registry[key], "Before", {}];
+    rs = Lookup[$Registry[key], "Around", {}];
+    as = Lookup[$Registry[key], "After",  {}];
     before = Map[First, bs];
     around = Map[First, rs];
     after  = Map[First, as];

@@ -25,8 +25,8 @@ myFunc[x_] := (Print["inner: ", x]; x^2)
 logBefore[args___] := Print["[before] args: ", {args}]
 logAfter[args___]  := Print["[after] done"]
 
-AdviceAdd[myFunc, "before", logBefore]
-AdviceAdd[myFunc, "after", logAfter]
+AdviceAdd[myFunc, "Before", logBefore]
+AdviceAdd[myFunc, "After", logAfter]
 
 myFunc[5]
 (* [before] args: {5} *)
@@ -44,18 +44,18 @@ AdviceClear[myFunc]   (* tear down completely *)
    - /target/: any symbol. Must not be the subject of an external
      =Clear= / =ClearAll= during the advice's lifetime — see [[file:Design.org][Design.org]]
      for the ownership contract.
-   - /combinator/: one of =:before=, =:around=, =:after=.
+   - /combinator/: one of ="Before"=, ="Around"=, ="After"=.
    - /adviceFunc/: a function. Schema depends on the combinator.
    - /priority/: Integer. Lower = runs first. Default =50=.
    - Returns: =$Registry= on success, =$Failed= on invalid combinator.
    - /Idempotent/: re-registering the same =adviceFunc= is a no-op.
 
 *** Combinator schemas
-    - =:before [args___]= — runs before the original. Return ignored.
-    - =:after [args___]= — runs after the original. Return ignored.
-    - =:around [origFun_, args___]= — composes around the original.
-      You can call =origFun= zero, one, or many times. The =args___=
-      pattern lets the advice accept any arity.
+   - ="Before" advice[args___]= — runs before the original. Return ignored.
+   - ="After" advice[args___]= — runs after the original. Return ignored.
+   - ="Around" advice[origFun_, args___]= — composes around the original.
+     You can call =origFun= zero, one, or many times. The =args___=
+     pattern lets the advice accept any arity.
 
 ** =AdviceRemove[target, adviceFunc]=
    Removes a specific advice. No-op if not registered. If removing the
@@ -86,8 +86,8 @@ AdviceClear[myFunc]   (* tear down completely *)
    wrap the target in a proxy function and advise the proxy.
 
 * Scope of v0.1
-   - Combinators: =:before=, =:around=, =:after= (=:override= is
-     deferred — use =:around= with priority 0).
+   - Combinators: ="Before"=, ="Around"=, ="After"= (=:override= is
+     deferred — use ="Around"= with priority 0).
    - Distribution: paclet from this repo.
    - Tested with Wolfram Engine 14.3 on Linux.
 
