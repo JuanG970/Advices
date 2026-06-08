@@ -23,17 +23,17 @@
 
 * v0.1 scope (explicit, not implicit)
 ** Combinators: three, not four
-   - =:before= — run before the original. Gets =args=. Return value
+   - ="Before"= — run before the original. Gets =args=. Return value
      discarded.
-   - =:around= — wraps the original. Receives =origFun= as the first
+   - ="Around"= — wraps the original. Receives =origFun= as the first
      argument, then =args=. Composes via =Fold=. If you don't call
      =origFun=, the original doesn't run.
-   - =:after= — run after the original. Gets =args=. Return value
+   - ="After"= — run after the original. Gets =args=. Return value
      discarded.
 
    /Dropped for v0.1:/ =:override= (the original design had it). The
    Emacs semantics for =:override= are subtle and the interactions
-   with =:around= confused the contract. Use a single =:around= with
+   with ="Around"= confused the contract. Use a single ="Around"= with
    the lowest priority for override-like behavior.
 
 ** Ownership contract (HARD RULE)
@@ -51,8 +51,8 @@
    - Default priority is =50=.
    - Within a combinator, advices are sorted by priority and run in
      priority order. Ties broken by registration order.
-   - Different combinators don't share priority space; =:before= and
-     =:after= and =:around= are independent stacks.
+   - Different combinators don't share priority space; ="Before"= and
+     ="After"= and ="Around"= are independent stacks.
 
 * Design Principles
 ** Centralized Registry
@@ -88,11 +88,11 @@
         └──────────┬───────────┘
                    │
         ┌──────────┴─────────────────────────────┐
-        │ 1. Sort by priority and run :before    │
-        │ 2. Fold :around chain over origFun     │
+        │ 1. Sort by priority and run "Before"    │
+        │ 2. Fold "Around" chain over origFun     │
         │    (origFun = Block[{$ActiveQ=False},  │
         │                     target[args]] )    │
-        │ 3. Run :after stack with same args     │
+        │ 3. Run "After" stack with same args     │
         └──────────┬─────────────────────────────┘
                    │
                    ▼
@@ -106,9 +106,9 @@
    #+BEGIN_SRC wolfram
    $Registry = <|
      Hold[TargetSymbol] -> <|
-       :before -> {AdviceObj[func, priority]...},
-       :around -> {AdviceObj[func, priority]...},
-       :after  -> {AdviceObj[func, priority]...}
+       "Before" -> {AdviceObj[func, priority]...},
+       "Around" -> {AdviceObj[func, priority]...},
+       "After"  -> {AdviceObj[func, priority]...}
      |>
    |>;
    #+END_SRC
@@ -119,14 +119,14 @@
 
 * What advices look like
 
-   :before / :after get a positional arg list (use =args___= so they
+   "Before" / "After" get a positional arg list (use =args___= so they
    can accept any arity):
 
    #+BEGIN_SRC wolfram
    logBefore[args___] := Print["[before] ", {args}]
    #+END_SRC
 
-   :around gets the original target as the first argument, then the
+   "Around" gets the original target as the first argument, then the
    call's args as =args___=:
 
    #+BEGIN_SRC wolfram
@@ -146,7 +146,7 @@
    - Cannot advise =Protected= symbols whose =Unprotect= would have
      side effects elsewhere. (Acceptable — that's a sign the symbol
      /shouldn't/ be advised.)
-   - No =:override= combinator. Use =:around= with priority 0.
+   - No =:override= combinator. Use ="Around"= with priority 0.
    - No thread-local advice. (Mathematica doesn't really have threads
      in the sense this matters; not a real loss.)
    - Cannot advise =Set= / =SetDelayed= / =Up= / =Down= (rule-shape

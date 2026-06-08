@@ -1,7 +1,8 @@
-
 (* ::Title:: Advices.wl — Emacs-style function advising for Wolfram Language *)
 (* ::Author:: Cass × JuanG970 *)
 (* ::Version:: 0.1.0 *)
+(* ::DO NOT EDIT:: This file is auto-generated from Implementation.org. *)
+(*                Edit the .org, then run `make tangle` (see Makefile).    *)
 (* ::History:: *)
 (*   0.1.0  2026-06-05  First public release. *)
 (*                Combinators: :before, :around, :after. *)
@@ -9,14 +10,13 @@
 
 BeginPackage["Advices`"];
 
-
 (* ::Section:: Public API *)
 
 (* AdviceAdd[target, combinator, adviceFunc, priority] *)
-(*   Registers an advice. combinator in {:before, :around, :after}. *)
+(*   Registers an advice. combinator in {"Before", "Around", "After"} (as strings). *)
 (*   priority defaults to 50. Lower runs first. *)
 (*   Idempotent: re-registering the same adviceFunc is a no-op. *)
-AdviceAdd::usage = "AdviceAdd[target_Symbol, combinator_Keyword, adviceFunc, priority:50] registers a global advice. combinator must be :before, :around, or :after.";
+AdviceAdd::usage = "AdviceAdd[target_Symbol, combinator_String, adviceFunc, priority:50] registers a global advice. combinator must be \"Before\", \"Around\", or \"After\".";
 
 (* AdviceRemove[target, adviceFunc] *)
 (*   Removes one advice. No-op if not present. *)
@@ -35,7 +35,6 @@ AdviceList::usage = "AdviceList[] returns a Dataset of all active advices. Advic
 (*   Returns the number of advices currently on a target. *)
 AdviceCount::usage = "AdviceCount[target_Symbol] returns the total number of advices currently registered for target.";
 
-
 Begin["`Private`"];
 
 (* ::Section:: Internal State *)
@@ -50,25 +49,24 @@ If[!AssociationQ[$InsideDispatch], $InsideDispatch = <||>];
 ClearAll[AdviceObj];
 AdviceObj[func_, priority_] := {func, priority};
 
-
 (* ::Section:: AdviceAdd *)
 
 SetAttributes[AdviceAdd, HoldFirst];
 
-AdviceAdd::invcomb = "Combinator `1` must be :before, :around, or :after.";
+AdviceAdd::invcomb = "Combinator `1` must be \"Before\", \"Around\", or \"After\".";
 AdviceAdd::inuse = "Target `1` is currently Protected and Advices could not Unprotect it.";
 
-AdviceAdd[target_Symbol, combinator_Keyword, adviceFunc_, priority_Integer:50] := Module[
+AdviceAdd[target_Symbol, combinator_String, adviceFunc_, priority_Integer:50] := Module[
   {key = Hold[target], wasProtected, symList, idx},
 
   (* Validate combinator *)
-  If[!MemberQ[{:before, :around, :after}, combinator],
+  If[!MemberQ[{"Before", "Around", "After"}, combinator],
     Message[AdviceAdd::invcomb, combinator]; Return[$Failed]
   ];
 
   (* Initialize registry slot for this target *)
   If[!KeyExistsQ[$Registry, key],
-    $Registry[key] = <|:before -> {}, :around -> {}, :after -> {}|>
+    $Registry[key] = <|"Before" -> {}, "Around" -> {}, "After" -> {}|>
   ];
 
   (* Idempotency: if adviceFunc is already registered for this combinator, do nothing *)
@@ -100,7 +98,6 @@ AdviceAdd[target_Symbol, combinator_Keyword, adviceFunc_, priority_Integer:50] :
   $Registry
 ]
 
-
 (* ::Section:: AdviceRemove *)
 
 SetAttributes[AdviceRemove, HoldFirst];
@@ -122,7 +119,6 @@ AdviceRemove[target_Symbol, adviceFunc_] := Module[{key = Hold[target]},
   $Registry
 ]
 
-
 (* ::Section:: AdviceClear *)
 
 SetAttributes[AdviceClear, HoldFirst];
@@ -143,22 +139,22 @@ AdviceClear[target_Symbol] := Module[{key = Hold[target], wasProtected},
   $Registry
 ]
 
-
 (* ::Section:: AdviceList / AdviceCount *)
+(* Note: HoldFirst wraps the argument in Hold[]. Use HoldPattern so the pattern *)
+(* matches a held symbol without forcing evaluation. *)
 
 SetAttributes[AdviceList, HoldFirst];
 
 AdviceList[] := Dataset[$Registry];
 
-AdviceList[target_Symbol] := Module[{key = Hold[target]},
+AdviceList[HoldPattern[target_Symbol]] := Module[{key = Hold[target]},
   If[KeyExistsQ[$Registry, key], Dataset[$Registry[key]], Dataset[<||>]]
 ];
 
-AdviceCount[target_Symbol] := Module[{key = Hold[target]},
+AdviceCount[HoldPattern[target_Symbol]] := Module[{key = Hold[target]},
   If[!KeyExistsQ[$Registry, key], Return[0]];
   Total[Length /@ Values[$Registry[key]]]
 ];
-
 
 (* ::Section:: Dispatcher *)
 
@@ -175,7 +171,7 @@ SetAttributes[AdviceDispatcher, HoldFirst];
 (* with $InsideDispatch already True and fall through to the original. *)
 (* Calling a *different* advised target is unaffected. *)
 AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
-  {key = Hold[target], before, around, after, result, runOriginal, argsSeq, prev},
+  {key = Hold[target], before, around, after, caught, runOriginal, argsSeq, prev},
 
   (* Save the previous value of the dispatch flag for this target, *)
   (* then set it True. We restore on exit so nested dispatcher calls *)
@@ -191,17 +187,29 @@ AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
   argsSeq = ReleaseHold[Hold[args]];
 
   (* Snapshot the active stacks (avoid registry mutation during execution) *)
-  before = $Registry[key, :before, [[All, 1]]];
-  around = $Registry[key, :around, [[All, 1]]];
-  after  = $Registry[key, :after,  [[All, 1]]];
+  (* Note: the local var names "Before", "Around", "After" shadow the string keys in the *)
+  (* registry. We read the registry into fresh names to avoid name-resolution confusion. *)
+  Module[{bs, rs, as},
+    bs = Lookup[$Registry[key], "Before", {}];
+    rs = Lookup[$Registry[key], "Around", {}];
+    as = Lookup[$Registry[key], "After",  {}];
+    before = Map[First, bs];
+    around = Map[First, rs];
+    after  = Map[First, as];
+  ];
 
   (* Closure that invokes the original target. Because $InsideDispatch *)
   (* is True at this point, the dispatcher rule's condition fails and *)
   (* the call falls through to the target's original DownValues. *)
   runOriginal[wrappedArgs___] := target[wrappedArgs];
 
-  result = Catch[
+  (* IMPORTANT: do not bind the dispatcher's return value to a variable named *)
+  (* "result" and then reference "result" inside the same RHS -- that returns *)
+  (* the unevaluated symbol. Instead, return the inner expressions directly *)
+  (* via Catch, then run :after hooks after the chain completes. *)
+  caught = Catch[
     (* 1. Run :before hooks in order; their return values are discarded *)
+    Null;
     Scan[#[argsSeq] &, before];
 
     (* 2. Compose :around chain via Fold, with runOriginal as the seed *)
@@ -212,21 +220,17 @@ AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
         runOriginal,
         Reverse[around]
       ][]
-    ];
-
-    (* 3. Run :after hooks; their return values are discarded *)
-    Scan[#[argsSeq] &, after];
-
-    (* Return the value of the last expression before this comment *)
-    result
+    ]
   ];
+
+  (* 3. Run :after hooks; their return values are discarded *)
+  Scan[#[argsSeq] &, after];
 
   (* Always restore the dispatch flag, even if an advice threw. *)
   $InsideDispatch[key] = prev;
 
-  result
+  caught
 ]
-
 
 End[];
 EndPackage[];
