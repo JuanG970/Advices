@@ -25,8 +25,8 @@ myFunc[x_] := (Print["inner: ", x]; x^2)
 logBefore[args___] := Print["[before] args: ", {args}]
 logAfter[args___]  := Print["[after] done"]
 
-AdviceAdd[myFunc, :before, logBefore]
-AdviceAdd[myFunc, :after, logAfter]
+AdviceAdd[myFunc, "before", logBefore]
+AdviceAdd[myFunc, "after", logAfter]
 
 myFunc[5]
 (* [before] args: {5} *)

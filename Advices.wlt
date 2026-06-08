@@ -14,16 +14,16 @@ VerificationTest[
 ]
 
 
-(* ::Section:: Test 1 — Basic :before / :after *)
+(* ::Section:: Test 1 — Basic "before" / "after" *)
 
 VerificationTest[
   Module[{calls = {}, myFunc},
     myFunc[x_] := (AppendTo[calls, {"inner", x}]; x^2);
     logBefore[args___] := AppendTo[calls, {"before", {args}}];
     logAfter[args___]  := AppendTo[calls, {"after", {args}}];
-    AdviceAdd[myFunc, :before, logBefore];
-    AdviceAdd[myFunc, :after, logAfter];
-    AdviceAdd[myFunc, :before, logBefore]; (* idempotent — should not double-fire *)
+    AdviceAdd[myFunc, "before", logBefore];
+    AdviceAdd[myFunc, "after", logAfter];
+    AdviceAdd[myFunc, "before", logBefore]; (* idempotent — should not double-fire *)
     myFunc[5];
     AdviceClear[myFunc];
     calls
@@ -40,7 +40,7 @@ VerificationTest[
       -1,
       origFun[val] * 2
     ];
-    AdviceAdd[targetCalc, :around, aroundHook];
+    AdviceAdd[targetCalc, "around", aroundHook];
     {targetCalc[5], targetCalc[-3]}
   ],
   {30, -1},
@@ -51,12 +51,12 @@ VerificationTest[
 VerificationTest[
   Module[{calls = {}, f, a, b, c},
     f[x_] := x;
-    a[] := AppendTo[calls, "A"];  (* default priority 50 *)
-    b[] := AppendTo[calls, "B"];  (* default priority 50 *)
-    c[] := AppendTo[calls, "C"];  (* default priority 50 *)
-    AdviceAdd[f, :before, b, 10];
-    AdviceAdd[f, :before, a, 20];
-    AdviceAdd[f, :before, c, 5];
+    a[args___] := AppendTo[calls, "A"];  (* default priority 50 *)
+    b[args___] := AppendTo[calls, "B"];  (* default priority 50 *)
+    c[args___] := AppendTo[calls, "C"];  (* default priority 50 *)
+    AdviceAdd[f, "before", b, 10];
+    AdviceAdd[f, "before", a, 20];
+    AdviceAdd[f, "before", c, 5];
     f[1];
     AdviceClear[f];
     calls
@@ -73,14 +73,14 @@ VerificationTest[
     h2[next_, args___] := (AppendTo[calls, "h2-in"]; next[args] * 10);
     h3[next_, args___] := (AppendTo[calls, "h3-in"]; next[args] - 100);
     (* h1, h2, h3 in priority order; around composes with first-added as outermost *)
-    AdviceAdd[f, :around, h1, 10];
-    AdviceAdd[f, :around, h2, 20];
-    AdviceAdd[f, :around, h3, 30];
+    AdviceAdd[f, "around", h1, 10];
+    AdviceAdd[f, "around", h2, 20];
+    AdviceAdd[f, "around", h3, 30];
     result = f[1];
     AdviceClear[f];
     {calls, result}
   ],
-  {{"h1-in", "h2-in", "h3-in", "orig"}, -88},
+  {{"h1-in", "h2-in", "h3-in", "orig"}, -989},
   TestID -> "Around-Chain-Composes"
 ]
 
@@ -90,8 +90,8 @@ VerificationTest[
     f[x_, y_] := x + y;
     beforeFn[args___] := captured["before"] = {args};
     afterFn[args___]  := captured["after"] = {args};
-    AdviceAdd[f, :before, beforeFn];
-    AdviceAdd[f, :after, afterFn];
+    AdviceAdd[f, "before", beforeFn];
+    AdviceAdd[f, "after", afterFn];
     f[3, 4];
     AdviceClear[f];
     {captured["before"], captured["after"]}
@@ -102,11 +102,11 @@ VerificationTest[
 
 
 VerificationTest[
-  Module[{calls = 0, f, recurseHook},
+  Module[{calls = {}, f, recurseHook},
     f[0] := 1;
     f[n_Integer?Positive] := n * f[n - 1];
     recurseHook[args___] := (AppendTo[calls, "hook"]; f[2]);
-    AdviceAdd[f, :before, recurseHook];
+    AdviceAdd[f, "before", recurseHook];
     result = f[3];
     AdviceClear[f];
     {Length[calls], result}
@@ -121,7 +121,7 @@ VerificationTest[
     myFunc[x_] := x + 1;
     Protect[myFunc];
     hook[args___] := Null;
-    AdviceAdd[myFunc, :before, hook];
+    AdviceAdd[myFunc, "before", hook];
     protected1 = MemberQ[Attributes[myFunc], Protected];
     result = myFunc[10];
     AdviceClear[myFunc];
@@ -137,9 +137,9 @@ VerificationTest[
   Module[{calls = 0, f, hook},
     f[x_] := x;
     hook[args___] := calls++;
-    AdviceAdd[f, :before, hook];
-    AdviceAdd[f, :before, hook];
-    AdviceAdd[f, :before, hook];
+    AdviceAdd[f, "before", hook];
+    AdviceAdd[f, "before", hook];
+    AdviceAdd[f, "before", hook];
     f[1];
     AdviceClear[f];
     calls
@@ -152,12 +152,12 @@ VerificationTest[
 VerificationTest[
   Module[{calls = {}, f, h1, h2, h3},
     f[x_] := x;
-    h1[] := AppendTo[calls, "h1"];
-    h2[] := AppendTo[calls, "h2"];
-    h3[] := AppendTo[calls, "h3"];
-    AdviceAdd[f, :before, h1];
-    AdviceAdd[f, :before, h2];
-    AdviceAdd[f, :before, h3];
+    h1[args___] := AppendTo[calls, "h1"];
+    h2[args___] := AppendTo[calls, "h2"];
+    h3[args___] := AppendTo[calls, "h3"];
+    AdviceAdd[f, "before", h1];
+    AdviceAdd[f, "before", h2];
+    AdviceAdd[f, "before", h3];
     AdviceRemove[f, h2];
     f[1];
     AdviceClear[f];
@@ -171,8 +171,8 @@ VerificationTest[
 VerificationTest[
   Module[{f, neverAdded},
     f[x_] := x;
-    neverAdded[] := Null;
-    AdviceAdd[f, :before, neverAdded];
+    neverAdded[args___] := Null;
+    AdviceAdd[f, "before", neverAdded];
     AdviceRemove[f, neverAdded];
     AdviceRemove[f, neverAdded]; (* double-remove *)
     result = f[1];
@@ -187,10 +187,10 @@ VerificationTest[
 VerificationTest[
   Module[{calls = {}, f, h1, h2},
     f[x_] := x;
-    h1[] := AppendTo[calls, "h1"];
-    h2[] := AppendTo[calls, "h2"];
-    AdviceAdd[f, :before, h1];
-    AdviceAdd[f, :after, h2];
+    h1[args___] := AppendTo[calls, "h1"];
+    h2[args___] := AppendTo[calls, "h2"];
+    AdviceAdd[f, "before", h1];
+    AdviceAdd[f, "after", h2];
     AdviceClear[f];
     f[1];
     {calls, AdviceCount[f]}
@@ -205,7 +205,7 @@ VerificationTest[
     f[x_] := x;
     sideEffect := (counter++; Unique[]);
     hook[args___] := {args};
-    AdviceAdd[f, :before, hook];
+    AdviceAdd[f, "before", hook];
     result = f[sideEffect, sideEffect];
     AdviceClear[f];
     {counter, Length[result]}
@@ -216,17 +216,19 @@ VerificationTest[
 
 
 VerificationTest[
-  Module[{log = <||>, f, g, fh, gh},
+  Module[{f, g, fh, gh},
+    fHooks = {};
+    gHooks = {};
     f[x_] := x + 1;
     g[x_] := x * 2;
-    fh[] := log["f"] = AppendTo[Lookup[log, "f", {}], "f-hook"];
-    gh[] := log["g"] = AppendTo[Lookup[log, "g", {}], "g-hook"];
-    AdviceAdd[f, :before, fh];
-    AdviceAdd[g, :before, gh];
+    fh[args___] := AppendTo[fHooks, "f-hook"];
+    gh[args___] := AppendTo[gHooks, "g-hook"];
+    AdviceAdd[f, "before", fh];
+    AdviceAdd[g, "before", gh];
     {f[5], g[5]};
     AdviceClear[f];
     AdviceClear[g];
-    {log["f"], log["g"]}
+    {fHooks, gHooks}
   ],
   {{"f-hook"}, {"g-hook"}},
   TestID -> "Multiple-Symbols-No-Interference"
@@ -238,8 +240,8 @@ VerificationTest[
     f[x_] := x;
     h1[args___] := Null;
     h2[args___] := Null;
-    AdviceAdd[f, :before, h1];
-    AdviceAdd[f, :after, h2];
+    AdviceAdd[f, "before", h1];
+    AdviceAdd[f, "after", h2];
     ds = AdviceList[f];
     AdviceClear[f];
     {Head[ds], AdviceCount[f]}
@@ -253,7 +255,7 @@ VerificationTest[
   Module[{f, h},
     f[x_] := x;
     h[args___] := Null;
-    result = AdviceAdd[f, :override, h] (* :override is not in v0.1 *)
+    result = AdviceAdd[f, "override", h] (* "override" is not in v0.1 *)
   ],
   $Failed,
   {AdviceAdd::invcomb},
