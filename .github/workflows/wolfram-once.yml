@@ -1,0 +1,43 @@
+name: Wolfram Engine CI (one-off)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/v0.1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Advices
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Emacs for Org tangling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends emacs-nox
+
+      # Check source/generated-file consistency before exposing the entitlement
+      # to the kernel step, so a tangle mismatch does not spend Service Credits.
+      - name: Tangle and verify committed outputs
+        run: |
+          make tangle
+          git diff --exit-code -- Advices.wl Advices.wlt
+
+      - name: Run Wolfram tests in the official Engine image
+        env:
+          WOLFRAMSCRIPT_ENTITLEMENTID: ${{ secrets.WOLFRAMSCRIPT_ENTITLEMENTID }}
+        run: |
+          if [ -z "${WOLFRAMSCRIPT_ENTITLEMENTID:-}" ]; then
+            echo "::error::WOLFRAMSCRIPT_ENTITLEMENTID repository secret is missing"
+            exit 1
+          fi
+          docker run --rm --pull always \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/workspace,readonly" \
+            --workdir /workspace \
+            --env WOLFRAMSCRIPT_ENTITLEMENTID \
+            wolframresearch/wolframengine:14.3@sha256:ff018b403ca9095c6b339aac3d6e719ed5b8cf7a318bbe6521db52cb6d7c567a \
+            wolframscript -script scripts/run-tests.wls
