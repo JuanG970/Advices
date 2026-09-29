@@ -4,7 +4,7 @@
 * What is this?
   A small paclet that gives you =advice-add= / =advice-remove= semantics
   on any Wolfram Language symbol. Three combinators, priority-ordered
-  composition, recursion-safe, single-rule dispatcher.
+  composition, recursion-safe advice dispatch.
 
 * Install
 #+BEGIN_SRC wolfram
@@ -73,17 +73,14 @@ AdviceClear[myFunc]   (* tear down completely *)
    Returns the total number of advices on a target (= 0= if none).
 
 * Hard rule: ownership
-   When you call =AdviceAdd= on a symbol, /you own it/. If you
-   subsequently call =Clear= or =ClearAll= on the symbol without first
-   calling =AdviceClear=, the registry will be out of sync with reality:
-   the dispatcher rule will be gone but the registry will say "active."
-   The next call to the target will go directly to its (now possibly
-   empty) =DownValues=, skipping all advices. =AdviceClear= and
-   =AdviceList= will continue to work; calls to the target will not.
-
-   This is a deliberate tradeoff: it keeps the dispatcher simple and
-   fast. If you want bulletproof behavior against external clears,
-   wrap the target in a proxy function and advise the proxy.
+   When you call =AdviceAdd= on a symbol, /you own it/. Advices wraps each
+   original =DownValues= rule, adds a catch-all dispatcher, and saves the
+   original definitions for =AdviceClear=. Treat the target's definitions as
+   fixed while advice is active: later definitions are not wrapped, and
+   =AdviceClear= restores the registration-time snapshot, discarding them.
+   If you call =Clear= or =ClearAll= first, the wrappers are removed while the
+   registry remains active; calls then skip advice. Call =AdviceClear= before
+   clearing the target.
 
 * Scope of v0.1
    - Combinators: ="Before"=, ="Around"=, ="After"= (=:override= is
@@ -101,7 +98,7 @@ AdviceClear[myFunc]   (* tear down completely *)
 * Where the docs live
    - [[file:Design.org][Design.org]] — architecture, design decisions, scope
    - [[file:Implementation.org][Implementation.org]] — the source code (tangles to =Advices.wl=)
-   - [[file:Tests.org][Tests.org]] — 15 test cases (tangles to =Advices.wlt=)
+   - [[file:Tests.org][Tests.org]] — 23 behavioral cases plus the package-load check (tangles to =Advices.wlt=)
    - [[file:PacletInfo.wl][PacletInfo.wl]] — paclet manifest
    - This file — install + quickstart
 

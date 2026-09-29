@@ -39,10 +39,68 @@ Begin["`Private`"];
 
 (* ::Section:: Internal State *)
 
-(* $Registry:      Association[Hold[target] -> Association[:before|:around|:after -> {AdviceObj[func, priority], ...}]] *)
-(* $InsideDispatch: Association[Hold[target] -> True|False], used by dispatcher for recursion control *)
+(* $Registry:          Association[Hold[target] -> Association["Before"|"Around"|"After" -> {AdviceObj[func, priority], ...}]] *)
+(* $InsideDispatch:     Association[Hold[target] -> True|False], used by dispatcher for recursion control *)
+(* $OriginalDownValues: snapshots restored by AdviceClear. *)
 If[!AssociationQ[$Registry], $Registry = <||>];
 If[!AssociationQ[$InsideDispatch], $InsideDispatch = <||>];
+If[!AssociationQ[$OriginalDownValues], $OriginalDownValues = <||>];
+
+(* A held call capture lets the wrapper pass the caller's actual arguments *)
+(* even when the original definition uses unnamed or literal patterns. *)
+ClearAll[NoOriginalBody, extractCallArgs, wrapDownValue, callCapturePlaceholder];
+SetAttributes[extractCallArgs, HoldAllComplete];
+extractCallArgs[target_Symbol, call_] := Replace[
+  HoldComplete[call],
+  HoldComplete[target[args___]] :> Hold[args]
+];
+
+(* Wrap one existing definition. The extra whole-call pattern captures the *)
+(* original call form; the body is retained for direct invocation by Around. *)
+wrapDownValue[rule_, target_Symbol, key_] := Module[
+  {heldRule, heldLhs, heldRhs, vars, renaming, renamedLhs, renamedRhs,
+   callVar, conditionQ, wrappedLhsTemplate, wrappedLhs, wrappedBody, wrappedRule},
+  heldRule = HoldComplete[rule];
+  heldLhs = Extract[heldRule, {1, 1}, HoldComplete];
+  heldRhs = Extract[heldRule, {1, 2}, HoldComplete];
+  vars = DeleteDuplicates[Cases[heldLhs, Verbatim[Pattern][s_Symbol, _] :> s, Infinity]];
+  renaming = Thread[vars -> (Unique["Advices`Private`pattern$"] & /@ vars)];
+  renamedLhs = heldLhs /. renaming;
+  renamedRhs = heldRhs /. renaming;
+  callVar = Unique["Advices`Private`call$"];
+  conditionQ = SameQ[Extract[heldLhs, {1, 1, 0}], Condition];
+  (* Do not inject callVar inside Condition's lexical pattern scope. Wolfram *)
+  (* renames a With-substituted Pattern variable there, leaving the RHS bound *)
+  (* to a different symbol. Use a placeholder, then replace its structural slot. *)
+  wrappedLhsTemplate = With[{t = target},
+    Replace[
+      renamedLhs,
+      {
+        HoldComplete[Verbatim[HoldPattern][Verbatim[Condition][Verbatim[t][args___], test_]]] :>
+          HoldComplete[HoldPattern[Condition[Pattern[callCapturePlaceholder, t[args]], test]]],
+        HoldComplete[Verbatim[HoldPattern][Verbatim[t][args___]]] :>
+          HoldComplete[HoldPattern[Pattern[callCapturePlaceholder, t[args]]]]
+      }
+    ]
+  ];
+  wrappedLhs = ReplacePart[
+    wrappedLhsTemplate,
+    If[conditionQ, {1, 1, 1, 1}, {1, 1, 1}] -> callVar
+  ];
+  wrappedBody = With[
+    {t = target, c = callVar, b = renamedRhs, k = key},
+    HoldComplete[If[
+      TrueQ[$InsideDispatch[k]],
+      ReleaseHold[b],
+      AdviceDispatcher[t, extractCallArgs[t, c], b]
+    ]]
+  ];
+  wrappedRule = With[
+    {lhs = ReleaseHold[wrappedLhs], rhs = wrappedBody},
+    HoldComplete[RuleDelayed[lhs, ReleaseHold[rhs]]]
+  ];
+  ReleaseHold[wrappedRule]
+];
 
 (* AdviceObj: a small wrapper so we can carry the priority alongside the function *)
 (* We use a head symbol so the registry lists remain printable. *)
@@ -57,7 +115,7 @@ AdviceAdd::invcomb = "Combinator `1` must be \"Before\", \"Around\", or \"After\
 AdviceAdd::inuse = "Target `1` is currently Protected and Advices could not Unprotect it.";
 
 AdviceAdd[target_Symbol, combinator_String, adviceFunc_, priority_Integer:50] := Module[
-  {key = Hold[target], wasProtected, symList, idx},
+  {key = Hold[target], wasProtected, symList, originalDownValues, wrappedDownValues},
 
   (* Validate combinator *)
   If[!MemberQ[{"Before", "Around", "After"}, combinator],
@@ -79,21 +137,27 @@ AdviceAdd[target_Symbol, combinator_String, adviceFunc_, priority_Integer:50] :=
   AppendTo[$Registry[key, combinator], AdviceObj[adviceFunc, priority]];
   $Registry[key, combinator] = SortBy[$Registry[key, combinator], Last];
 
-  (* Install the dispatcher hook on first registration for this target *)
-  $InsideDispatch[key] = False;
-  wasProtected = MemberQ[Attributes[target], Protected];
-  If[wasProtected, Unprotect[target]];
+  (* On first registration, wrap the original definitions and add a catch-all *)
+  (* dispatcher for calls that match no original DownValue. *)
+  If[!KeyExistsQ[$OriginalDownValues, key],
+    originalDownValues = DownValues[target];
+    wrappedDownValues = wrapDownValue[#, target, key] & /@ originalDownValues;
+    $OriginalDownValues[key] = originalDownValues;
+    $InsideDispatch[key] = False;
 
-  (* Check whether an AdviceDispatcher rule is already in DownValues. *)
-  (* Match any rule (Rule or RuleDelayed) whose RHS is an AdviceDispatcher call. *)
-  If[FreeQ[DownValues[target], _[_, AdviceDispatcher[___]]],
-    PrependTo[DownValues[target],
-      HoldPattern[target[args___]] /; ! TrueQ[$InsideDispatch[Hold[target]]] :>
-        AdviceDispatcher[target, Hold[args]]
-    ]
+    wasProtected = MemberQ[Attributes[target], Protected];
+    If[wasProtected, Unprotect[target]];
+
+    DownValues[target] = Join[
+      wrappedDownValues,
+      {
+        HoldPattern[target[args___]] /; ! TrueQ[$InsideDispatch[Hold[target]]] :>
+          AdviceDispatcher[target, Hold[args], HoldComplete[NoOriginalBody]]
+      }
+    ];
+
+    If[wasProtected, Protect[target]];
   ];
-
-  If[wasProtected, Protect[target]];
 
   $Registry
 ]
@@ -127,14 +191,13 @@ AdviceClear[target_Symbol] := Module[{key = Hold[target], wasProtected},
   KeyDropFrom[$Registry, key];
   KeyDropFrom[$InsideDispatch, key];
 
-  wasProtected = MemberQ[Attributes[target], Protected];
-  If[wasProtected, Unprotect[target]];
-
-  (* Remove only the dispatcher rule; leave all other DownValues intact *)
-  (* Match any rule (Rule or RuleDelayed) whose RHS is an AdviceDispatcher call. *)
-  DownValues[target] = DeleteCases[DownValues[target], _[_, AdviceDispatcher[___]]];
-
-  If[wasProtected, Protect[target]];
+  If[KeyExistsQ[$OriginalDownValues, key],
+    wasProtected = MemberQ[Attributes[target], Protected];
+    If[wasProtected, Unprotect[target]];
+    DownValues[target] = $OriginalDownValues[key];
+    If[wasProtected, Protect[target]];
+    KeyDropFrom[$OriginalDownValues, key];
+  ];
 
   $Registry
 ]
@@ -160,31 +223,21 @@ AdviceCount[HoldPattern[target_Symbol]] := Module[{key = Hold[target]},
 
 SetAttributes[AdviceDispatcher, HoldFirst];
 
-(* The single entry point that runs the advice chain. *)
-(* Strategy: Hold[args___] captures the caller's arguments in *)
-(* unevaluated form. We then call ReleaseHold[Hold[args]] once to *)
-(* produce the evaluated values. Advices see those evaluated values. *)
-(* Recursion guard: the dispatcher rule's condition is *)
-(*   /; ! TrueQ[$InsideDispatch[Hold[target]]] *)
-(* We set $InsideDispatch=True on entry and reset on exit. Advices *)
-(* calling target[args] from inside the chain will hit the dispatcher *)
-(* with $InsideDispatch already True and fall through to the original. *)
-(* Calling a *different* advised target is unaffected. *)
-AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
-  {key = Hold[target], before, around, after, caught, runOriginal, argsSeq, prev},
+(* The target-specific wrapper supplies held arguments and the body of the *)
+(* selected original definition. Generic unmatched calls use NoOriginalBody. *)
+(* We evaluate caller arguments once, retain them for Before/Around/After, and *)
+(* run the captured body directly when Around calls origFun with those args. *)
+AdviceDispatcher[target_Symbol, heldArgs_Hold, body_HoldComplete] := Module[
+  {key = Hold[target], before, around, after, caught, runOriginal,
+   argsSeq, originalArgsHeld, prev},
 
-  (* Save the previous value of the dispatch flag for this target, *)
-  (* then set it True. We restore on exit so nested dispatcher calls *)
-  (* see this flag as True (they save True, set True, restore True) *)
-  (* and so the outer dispatcher sees this flag as False after the *)
-  (* inner call returns. This guarantees mutual-exclusion semantics. *)
+  (* Save and set the per-target recursion flag. *)
   prev = Lookup[$InsideDispatch, key, False];
   $InsideDispatch[key] = True;
 
-  (* Single release of the held args. After this, argsSeq is a flat *)
-  (* sequence of evaluated values. Side-effects from evaluation happen *)
-  (* exactly once, right here. *)
-  argsSeq = ReleaseHold[Hold[args]];
+  (* Release the caller's held args once; advices see these values. *)
+  argsSeq = ReleaseHold[heldArgs];
+  originalArgsHeld = With[{argValues = {argsSeq}}, HoldComplete[argValues]];
 
   (* Snapshot the active stacks (avoid registry mutation during execution) *)
   (* Note: the local var names "Before", "Around", "After" shadow the string keys in the *)
@@ -198,10 +251,13 @@ AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
     after  = Map[First, as];
   ];
 
-  (* Closure that invokes the original target. Because $InsideDispatch *)
-  (* is True at this point, the dispatcher rule's condition fails and *)
-  (* the call falls through to the target's original DownValues. *)
-  runOriginal[wrappedArgs___] := target[wrappedArgs];
+  (* Use the captured body for the original argument list; modified Around args *)
+  (* re-enter the target, where the selected wrapped definition runs without advice. *)
+  runOriginal[wrappedArgs___] := If[
+    SameQ[HoldComplete[{wrappedArgs}], originalArgsHeld],
+    If[SameQ[body, HoldComplete[NoOriginalBody]], target[wrappedArgs], ReleaseHold[body]],
+    target[wrappedArgs]
+  ];
 
   (* IMPORTANT: do not bind the dispatcher's return value to a variable named *)
   (* "result" and then reference "result" inside the same RHS -- that returns *)
@@ -226,8 +282,11 @@ AdviceDispatcher[target_Symbol, Hold[args___]] := Module[
   (* 3. Run :after hooks; their return values are discarded *)
   Scan[#[argsSeq] &, after];
 
-  (* Always restore the dispatch flag, even if an advice threw. *)
-  $InsideDispatch[key] = prev;
+  (* Restore the flag, but do not resurrect it if AdviceClear ran in-flight. *)
+  If[KeyExistsQ[$Registry, key],
+    $InsideDispatch[key] = prev,
+    KeyDropFrom[$InsideDispatch, key]
+  ];
 
   caught
 ]
