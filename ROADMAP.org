@@ -1,0 +1,44 @@
+#+TITLE: Advices — Roadmap
+#+SUBTITLE: Provisional priorities after v0.1
+#+AUTHOR: Juan Gonzalez × Cass
+#+STARTUP: overview
+
+* Purpose
+This is a short, reviewable queue, not a release promise. The priority is to
+make the v0.1 behavior dependable and its contracts testable before adding
+more combinators. GitHub issues are the actionable tickets; update this page
+when priorities change or work lands.
+
+* Active work
+- [[https://github.com/JuanG970/Advices/pull/3][PR #3]] — preserve advice dispatch for exact-match and zero-argument
+definitions; includes regression coverage.
+- [[https://github.com/JuanG970/Advices/issues/4][Issue #4]] — secret-safe PR checks and trusted-branch Wolfram testing.
+  No hosted Wolfram run is implied or authorized by this roadmap.
+
+* Next correctness and contract work
+1. [[https://github.com/JuanG970/Advices/issues/6][Issue #6: AdviceCount target identity]]. Decide and test whether the target
+   is held, consistent with the symbol-identity API and =AdviceList=.
+2. [[https://github.com/JuanG970/Advices/issues/7][Issue #7: equal-priority ordering]]. Lock down the documented registration-
+   order tie-break with a regression test.
+
+These should stay small, separate PRs. For Wolfram code and tests, edit
+=Implementation.org= and =Tests.org=, tangle generated files, and use
+=make check=. Report exactly which checks ran; a blocked runtime test is not a
+pass.
+
+* Deferred feature work
+The existing v0.2+ deferrals remain deferred until a concrete use case and
+contract are agreed:
+- =:override= and =:filter-args= combinators.
+- Bulk removal by combinator and per-symbol advice-count limits.
+- Paclet-site publication.
+
+Revisit these only after the correctness items above, not as automatic release
+commitments.
+
+* Completion bar before expanding scope
+- Dispatcher behavior for supported definition shapes is covered by tests.
+- Public API target-identity and ordering contracts match their tests.
+- =make check= passes with generated files synchronized.
+- PR checks do not expose Wolfram entitlement data to PR code; any hosted
+  kernel run requires its own explicit authorization.
