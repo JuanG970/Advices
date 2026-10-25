@@ -11,6 +11,7 @@ unless marked *untested*. No secret value appears anywhere in this directory.
 | Wolfram Engine 14.3, pinned by image digest | Installed and checksum-verified. `wolframscript` runs, the kernel binary starts and prints its (unlicensed) banner, no unresolved shared libraries. From scratch: 1 min 48 s, 6.7 GB on disk. |
 | `emacs-nox` and `make tangle` | Works. The committed `Advices.wl` / `Advices.wlt` are identical to a fresh tangle of the `.org` sources. |
 | Evaluating Wolfram Language (a licensed kernel) | **Blocked in this kind of session** -- see below. |
+| Woxi (open-source interpreter, no license needed) | Installs in 4 s from a hash-pinned PyPI wheel. Release 0.3.0 cannot run Advices; its `main` branch can after two portable edits (12 of 15 tests clean). Not a substitute for the real Engine -- see option E. |
 | `make test` | Not run here (needs a licensed kernel). Baseline: 16 of 16 passed in your CI run on 2026-09-28. |
 
 ## The blocker: the license check is not HTTPS
@@ -53,30 +54,107 @@ Two things to know when it fails:
 | **B. Self-hosted Claude environment** | Sessions run on your infrastructure, so you can allow TCP 16286. | Docs only. | Plan/org support for self-hosted environments and a runner you operate. | Interactive local kernel; most to operate. |
 | **C. Wolfram Cloud over HTTPS** | `wolframscript -cloud` runs code on Wolfram's servers. | With no credentials it connected to the session proxy (`strace`: the only non-DNS connect was `127.0.0.1:46513`), prompted for a Wolfram ID and printed `Incorrect username or password`. That is consistent with the cloud login answering over HTTPS, but I did not verify the reply, and nothing further. | A Wolfram ID and password as environment variables, readable by anyone using the environment. | Runs remotely (no local files), cloud limits and billing, `Advices.wl` would have to be shipped to the cloud kernel. |
 | **D. Activation key (node-locked)** | The unlicensed kernel offers "automatic Web Activation" with an activation key (its banner points to `https://user.wolfram.com`). | Only that the prompt appears. This VM's MathID was `6532-72628-33049`, machine name `vm`; whether it is stable across sessions is unknown. | A license type that has an activation key (the on-demand entitlement does not) and its credentials. | *Untested.* May need re-activation on every VM and count against activation limits. |
+| **E. Woxi** (open-source reimplementation, AGPL-3.0) | Runs locally with no license check, so the port-16286 problem does not exist for it. | Installed and measured; see the next section. | A decision on how far to trust a reimplementation, and which build. | Silently differs from the real Engine in places I tested. `VerificationTest` is "not planned" in Woxi. Advices needs edits to run on it. |
 
 There is no environment setting for raw TCP: the access levels are None / Trusted /
 Full / Custom, and all are domain-based.
 
+## Woxi (option E): what I measured
+
+[Woxi](https://woxi.ad-si.com) is an open-source (AGPL-3.0-or-later) Wolfram Language
+interpreter written in Rust. It needs no kernel and no license server. Release 0.3.0 is
+on PyPI (dated 2026-08-06 in its changelog); `main` is moving fast (1,882 commits since
+2026-08-05, the latest on 2026-10-25). Its own `functions.csv` marks 3,314 of 6,382
+symbols implemented on `main` (52%, up from 47% at 0.3.0). That list marks
+`VerificationTest` "out of scope for Woxi" (the source's wording for its not-planned
+marker) and leaves `TestReport` blank ("not implemented (yet)"), so this repo's test
+runner cannot run on Woxi unchanged.
+
+**Install** (verified here: 3.7 s; pip refuses a wrong hash). Hosts: `pypi.org` and
+`files.pythonhosted.org`, both on the Trusted list.
+
+```bash
+python3 -m venv /opt/woxi
+echo 'woxi==0.3.0 --hash=sha256:46fedeab967568383f3fef2da5543bcb119be92a2de7093f5a778952003c5a0b' > /tmp/woxi-requirements.txt
+/opt/woxi/bin/pip install --require-hashes -r /tmp/woxi-requirements.txt
+ln -sf /opt/woxi/bin/woxi /usr/local/bin/woxi
+```
+
+`main` cannot be installed that way. I built it (dev profile, `--locked`, in a stripped
+environment without session credentials) in 8 min 21 s, which is longer than the roughly
+five-minute setup-script cache window, and it needs crates.io plus a git dependency on
+GitHub (`astro-float`).
+
+**Results.** Re-run them with `python3 -I cloud-env/woxi-compat/probes.py woxi` and
+`python3 -I cloud-env/woxi-compat/suite.py woxi`. Neither touches the repo.
+
+| | Release 0.3.0 | `main` @ 385306a |
+|---|---|---|
+| 33 probes (everyday functions, evaluator semantics, packages, Advices) | 28 pass | 31 pass |
+| The repo's 15 tests after the load test, library as committed | 1 clean, 4 with messages | same |
+| ... with one edit (the dispatcher rule's form) | 5 clean, but four of those tests also pass when no advice ever fires | 3 clean |
+| ... with both portable edits below | 5 clean, the same five | **12 clean**, 1 with messages, 2 failing |
+
+Both builds reject a rule written `HoldPattern[f[a___]] /; cond :> rhs` in
+`PrependTo[DownValues[f], ...]` ("Tag HoldPattern ... is Protected"), which is how
+Advices installs its dispatcher. 0.3.0 also fails rule removal from `DownValues`
+(probe 2.12) and package loading (3.01, 3.02); `main` fixed those.
+
+**The two portable edits** (not applied to the repo). I believe both are valid on the
+real Engine: the first is the form `DownValues` itself returns, and the second uses only
+`Append`. That is unverified, so CI on the real Engine must confirm before merging.
+
+1. `Advices.wl` line 91: `HoldPattern[target[args___]] /; cond :> rhs` becomes
+   `HoldPattern[target[args___] /; cond] :> rhs`.
+2. `Advices.wl` lines 79-80: the nested `AppendTo[$Registry[key, c], x]` followed by
+   `$Registry[key, c] = SortBy[...]` becomes the single-key assignment
+   `$Registry[key] = Append[$Registry[key], c -> SortBy[Append[$Registry[key, c], x], Last]]`.
+
+Still failing on `main` after both edits: `Remove-Non-Existent-Is-No-Op` (a garbage
+result containing `"KeyAbsent"`, so a `Missing[...]` is leaking through somewhere; I did
+not trace it), `AdviceClear-Fully-Purges` (passes but emits `Lookup::invrl` about a
+`Missing[...]` argument, which real `VerificationTest` counts as a failure) and
+`Holding-Boundary-Args-Evaluated-Once` (`$RecursionLimit` exceeded).
+
+**Silent divergences, the worst kind (no error, wrong result).** `r[k1, k2] = v` and
+`AppendTo[r[k1, k2], x]` on a nested Association do nothing in both builds. That is why
+Advices registered no hooks. In 0.3.0 only: `DownValues[f] = {}` did not clear,
+conditional definitions lost their condition in `DownValues`, and a named blank inside
+`Rule[a, id_]` never bound. In both builds `InputForm[expr]` prints as the literal
+wrapper (`InputForm[ab]`) instead of the input-form text. Treat Woxi results as
+hypotheses to confirm on the real Engine.
+
+**License.** AGPL-3.0-or-later (the wheel's metadata says so). As I understand it,
+running your own scripts through the CLI does not put them under the AGPL, while
+modifying Woxi and distributing it or offering it over a network carries obligations. I
+am not a lawyer; check if it matters for you.
+
 ## What I need from you
 
-1. **Pick a path (A-D).** Without one I cannot evaluate any Wolfram Language. I
-   recommend A.
+1. **Pick a path (A-E).** Without one I cannot evaluate any Wolfram Language on the
+   real Engine. I recommend A as the source of truth, plus E only if you want a quick
+   local loop while editing.
 2. **Do not put `WOLFRAMSCRIPT_ENTITLEMENTID` in the Claude environment yet.**
    Environment variables are readable by "anyone who uses the environment" and by
    any command I run, and in a hosted session it cannot work anyway. Keep it in
    GitHub Secrets (A) or add it only to a self-hosted environment (B).
 3. **Engine version.** I pinned 14.3 (your README and CI). 15.0 exists
    (`sha256:3ac08d6aaa33...`, untested here). Say if you want it.
-4. **What the experiments are**, mainly whether they need the internet
+4. **Woxi: yes or no, and which build.** Release 0.3.0 installs in 4 s but cannot run
+   Advices. `main` runs 12 of 15 tests after two edits to `Advices.wl`, but takes 8 min
+   to build (too slow for the setup-script cache) and still diverges from the real
+   Engine. If you want it, I also need your OK to make those two edits, which must
+   then pass CI on the real Engine before merging.
+5. **What the experiments are**, mainly whether they need the internet
    (Wolfram|Alpha, `Entity` data, `ResourceFunction`, `PacletInstall`, LLM
    functions) or heavy compute. That decides allowlist entries and credit use. Also
    a rough **Service Credit budget**: I cannot see your balance or rates, and I
    assume from your CI comment that every kernel session spends credits.
-5. **Merge it.** This directory is committed and pushed on branch
+6. **Merge it.** This directory is committed and pushed on branch
    `claude/cloud-env-wolfram` (no PR opened). The setup-script line below only works
    once these files are on the branch your environment clones (`v0.1`), so merge
    when you are happy with them, or tell me and I will open the PR.
-6. *(Optional)* A short `CLAUDE.md` so future sessions read this file first and do
+7. *(Optional)* A short `CLAUDE.md` so future sessions read this file first and do
    not start a kernel blindly.
 
 ## Replicating the environment
@@ -123,6 +201,7 @@ Setup-script rules from the docs, and how this script meets them:
 | `setup.sh` | Entry point. apt libraries and tools, then the Engine. Idempotent: a re-run is a 3 s no-op. |
 | `install-wolfram-engine.sh` | Installs the pinned official image without a Docker daemon. Verifies every sha256 back to the pinned manifest digest. Never starts a kernel. |
 | `verify.sh` | Checks platform, install, libraries, tangle sync, entitlement presence (never its value) and the license port. `--kernel` also starts one licensed kernel (spends credits; skipped if the port is closed). Exit status = number of failures. |
+| `woxi-compat/probes.py`, `woxi-compat/suite.py` | Re-runnable checks of Woxi against standard Wolfram behaviour and against this repo's tests. Standard-library Python only; they copy anything they change into temp dirs and never touch the repo. Re-run them when Woxi 0.4.0 appears. |
 
 ### Expected `verify.sh` output today
 
@@ -203,6 +282,12 @@ most recent install takes the `WolframKernel` link.
     download, cache hit with the network deliberately broken, same-size corruption,
     truncated resume, oversize file, bad digest. Re-ran `setup.sh`: 3 s no-op. Added
     `WOLFRAM_ENGINE=skip`.
+11. **Evaluated Woxi** when you asked about it. Installed the PyPI wheel into a scratch
+    venv, read its own `functions.csv`, ran 33 probes and this repo's 15 tests (through
+    a stand-in for `VerificationTest`), cloned `main` read-only and built it in a
+    stripped environment, found the two blocking constructs, and tested portable
+    rewrites in scratch copies. Details in "Woxi (option E)". I attached nothing: the
+    tool reported that read access to the public repo was already available.
 
 ## Reference
 
@@ -236,3 +321,9 @@ Engine step (pull a 2.5 GiB image, start a kernel, run the tests) took 61 s. Rep
 
 **The sandbox.** Ubuntu 24.04.5 on a Firecracker VM (kernel 6.18.44), 4 vCPU, 15 GiB RAM,
 about 30 GB disk. Docs list 4 vCPU / 16 GB / 30 GB as the ceilings.
+
+**Woxi pins.** PyPI `woxi==0.3.0`, the `manylinux_2_17_x86_64` wheel, sha256
+`46fedeab967568383f3fef2da5543bcb119be92a2de7093f5a778952003c5a0b` (matches PyPI's
+published digest). `main` was measured at commit
+`385306acfaa2cc14741fe2f50eef4abc25c06105` (2026-10-25). Its `Cargo.toml` still says
+0.3.0, so `woxi --version` cannot tell the two builds apart.
