@@ -56,47 +56,53 @@
 
 * Design Principles
 ** Centralized Registry
-   One global =$Registry= holds all advice metadata. The dispatcher
-   reads from it. There's exactly one =DownValues= rule on the target
-   symbol — a "hook" that checks =$ActiveQ= and either dispatches or
-   falls through to the original.
+   One global =$Registry= holds all advice metadata. On first registration,
+   each original =DownValues= rule is wrapped and a generic catch-all is added.
+   A snapshot lets =AdviceClear= restore the original definitions exactly.
+   Wrapping each matched rule prevents specificity ordering from letting exact
+   and zero-argument definitions bypass advice. Definitions are effectively
+   fixed while advice is active: later downvalues are not wrapped, and the
+   snapshot restoration discards them.
+
+** Recursion isolation
+   =$InsideDispatch= is set for the target while its advice chain runs.
+   Wrapped definitions evaluate their original right-hand side while the flag
+   is =True=; recursive calls therefore do not re-run advice. The generic
+   catch-all is disabled during that interval, so unmatched calls stay
+   unevaluated. Other advised targets are unaffected.
 
 ** Idempotency
    Registering the same =adviceFunc= on the same =target= and
-   combinator twice does /not/ stack. (Implementation choice: it would
-   be a footgun to allow duplicate hooks. We can lift this constraint
-   in v0.2 if a real use case shows up.)
-
-** Isolation via Block
-   The original target is called inside =Block[{$ActiveQ = False}, ...]=
-   so the dispatcher knows to fall through. This prevents infinite
-   recursion if an advice calls the same target.
+   combinator twice does /not/ stack. It would be a footgun to allow
+   duplicate hooks.
 
 * System Architecture
 #+BEGIN_SRC text
   Caller invokes advisedTarget[args___]
                  │
                  ▼
-        ┌──────────────────────┐    False   ┌────────────────────────┐
-        │  ActiveQ for target? ├──────────►│ Fall through to       │
-        └──────────┬───────────┘            │ target's DownValues    │
-                   │ True                   │ (which may be original │
-                   ▼                        │ or may be empty)        │
-        ┌──────────────────────┐            └────────────────────────┘
-        │   AdviceDispatcher   │
-        │  (single rule)       │
-        └──────────┬───────────┘
-                   │
-        ┌──────────┴─────────────────────────────┐
-        │ 1. Sort by priority and run "Before"    │
-        │ 2. Fold "Around" chain over origFun     │
-        │    (origFun = Block[{$ActiveQ=False},  │
-        │                     target[args]] )    │
-        │ 3. Run "After" stack with same args     │
-        └──────────┬─────────────────────────────┘
-                   │
-                   ▼
-               result
+        ┌───────────────────────────────┐
+        │ DownValues pattern selection  │
+        └───────────┬───────────────────┘
+                    │
+          ┌─────────┴──────────┐
+          │                    │
+  matched original rule     no match
+          │                    │
+          ▼                    ▼
+  ┌───────────────────┐  ┌───────────────────┐
+  │ Wrapped definition│  │ Catch-all (only   │
+  └─────────┬─────────┘  │ while inactive)   │
+            │            └─────────┬─────────┘
+      InsideDispatch?              │
+       False│    │True             │
+            ▼    ▼                 ▼
+   ┌────────────┐ ┌────────────┐ ┌────────────────┐
+   │ Dispatcher │ │ Original   │ │ Dispatcher     │
+   │ advice     │ │ RHS        │ │ (unmatched call)│
+   └──────┬─────┘ └────────────┘ └────────────────┘
+          │ origFun[args]
+          └── modified args re-enter wrapped definitions
 #+END_SRC
 
 * Registry Shape
@@ -113,9 +119,9 @@
    |>;
    #+END_SRC
 
-   =$ActiveQ= is a parallel =Association= from =Hold[target]= → =True|False=
-   used by the dispatcher to decide whether to invoke the advice chain
-   or fall through to the original.
+   =$InsideDispatch= is a parallel =Association= from =Hold[target]= → =True|False=.
+   Wrapped definitions execute their original body when it is =True=; the
+   generic catch-all dispatches only when it is =False=.
 
 * What advices look like
 

@@ -248,3 +248,112 @@ VerificationTest[
   {AdviceAdd::invcomb},
   TestID -> "Invalid-Combinator-Fails"
 ]
+
+VerificationTest[
+  Module[{zero, hook, calls = 0, result},
+    zero[] := 17;
+    hook[args___] := (calls++; Null);
+    AdviceAdd[zero, "Before", hook];
+    result = zero[];
+    AdviceClear[zero];
+    {result, calls}
+  ],
+  {17, 1},
+  TestID -> "Zero-Argument-Target-Is-Advised"
+]
+
+VerificationTest[
+  Module[{f, hook, calls = {}, result},
+    f[0] := "exact";
+    f[x_] := x;
+    hook[args___] := AppendTo[calls, {args}];
+    AdviceAdd[f, "Before", hook];
+    result = {f[0], f[1]};
+    AdviceClear[f];
+    {result, calls}
+  ],
+  {{"exact", 1}, {{0}, {1}}},
+  TestID -> "Exact-Definition-Is-Advised"
+]
+
+VerificationTest[
+  Module[{f, shift, advisedResult},
+    f[0] := "zero";
+    f[n_Integer] := {"integer", n};
+    shift[origFun_, arg_] := origFun[arg + 1];
+    AdviceAdd[f, "Around", shift];
+    advisedResult = f[0];
+    AdviceClear[f];
+    {advisedResult, f[0]}
+  ],
+  {{"integer", 1}, "zero"},
+  TestID -> "Around-Transformed-Args-Across-Exact-Definition"
+]
+
+VerificationTest[
+  Module[{f, hook, calls = {}, matched, unmatched},
+    f[_Integer] := "integer";
+    hook[args___] := AppendTo[calls, {args}];
+    AdviceAdd[f, "Before", hook];
+    matched = f[4];
+    unmatched = f["x"];
+    AdviceClear[f];
+    {matched, Head[unmatched] === f, Length[unmatched], First[unmatched], calls}
+  ],
+  {"integer", True, 1, "x", {{4}, {"x"}}},
+  TestID -> "Unnamed-Pattern-And-Unmatched-Call"
+]
+
+VerificationTest[
+  Module[{f, clearAdvice, inFlight, afterClear},
+    f[x_] := x + 1;
+    clearAdvice[args___] := AdviceClear[f];
+    AdviceAdd[f, "Before", clearAdvice];
+    inFlight = f[1];
+    afterClear = f[1];
+    {inFlight, afterClear, AdviceCount[f]}
+  ],
+  {2, 2, 0},
+  TestID -> "AdviceClear-During-Dispatch"
+]
+
+VerificationTest[
+  Module[{f, hook, calls = {}, result},
+    f[HoldComplete[f[x_]]] := "nested";
+    hook[args___] := AppendTo[calls, {args}];
+    AdviceAdd[f, "Before", hook];
+    result = f[HoldComplete[f[3]]];
+    AdviceClear[f];
+    {result, Head[First[First[First[calls]]]] === f}
+  ],
+  {"nested", True},
+  TestID -> "Nested-Target-In-Argument-Pattern"
+]
+
+VerificationTest[
+  Module[{f, hook, calls = {}, result},
+    SetAttributes[f, HoldAll];
+    f[f[x_]] := x;
+    hook[args___] := AppendTo[calls, {args}];
+    AdviceAdd[f, "Before", hook];
+    result = f[f[3]];
+    AdviceClear[f];
+    {result, Head[First[First[calls]]] === f}
+  ],
+  {3, True},
+  TestID -> "Nested-Target-Pattern-Outer-Call-Only"
+]
+
+VerificationTest[
+  Module[{f, hook, calls = {}, result},
+    f[0] := True;
+    f[x_] /; f[0] := x;
+    hook[args___] := AppendTo[calls, {args}];
+    AdviceAdd[f, "Before", hook];
+    result = f[2];
+    AdviceClear[f];
+    {result, calls}
+  ],
+  {2, {{0}, {2}}},
+  TestID -> "Condition-Predicate-Keeps-Target-Call"
+]
