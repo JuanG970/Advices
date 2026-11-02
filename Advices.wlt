@@ -248,3 +248,24 @@ VerificationTest[
   {AdviceAdd::invcomb},
   TestID -> "Invalid-Combinator-Fails"
 ]
+
+VerificationTest[
+  Module[{target, aliasedTarget, h1, h2, h3, zeroCount, targetCount, clearedCount, aliasCount},
+    h1[args___] := Null;
+    h2[args___] := Null;
+    h3[args___] := Null;
+    AdviceAdd[aliasedTarget, "Before", h1];
+    AdviceAdd[aliasedTarget, "After", h2];
+    target = aliasedTarget;
+    zeroCount = AdviceCount[target];
+    AdviceAdd[target, "Before", h3];
+    targetCount = AdviceCount[target];
+    AdviceClear[target];
+    clearedCount = AdviceCount[target];
+    aliasCount = AdviceCount[aliasedTarget];
+    AdviceClear[aliasedTarget];
+    {zeroCount, targetCount, clearedCount, aliasCount}
+  ],
+  {0, 1, 0, 2},
+  TestID -> "AdviceCount-Holds-Target-With-OwnValue"
+]

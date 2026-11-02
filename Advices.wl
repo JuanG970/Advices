@@ -33,7 +33,7 @@ AdviceList::usage = "AdviceList[] returns a Dataset of all active advices. Advic
 
 (* AdviceCount[target] *)
 (*   Returns the number of advices currently on a target. *)
-AdviceCount::usage = "AdviceCount[target_Symbol] returns the total number of advices currently registered for target.";
+AdviceCount::usage = "AdviceCount[target_Symbol] returns the total number of advices registered for target, holding target unevaluated so an OwnValue does not change its identity.";
 
 Begin["`Private`"];
 
@@ -140,10 +140,11 @@ AdviceClear[target_Symbol] := Module[{key = Hold[target], wasProtected},
 ]
 
 (* ::Section:: AdviceList / AdviceCount *)
-(* Note: HoldFirst wraps the argument in Hold[]. Use HoldPattern so the pattern *)
-(* matches a held symbol without forcing evaluation. *)
+(* These APIs identify a target by its unevaluated symbol identity, even if it *)
+(* has an OwnValue. HoldFirst plus HoldPattern keeps the held-symbol pattern. *)
 
 SetAttributes[AdviceList, HoldFirst];
+SetAttributes[AdviceCount, HoldFirst];
 
 AdviceList[] := Dataset[$Registry];
 
